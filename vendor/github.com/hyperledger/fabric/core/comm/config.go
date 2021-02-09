@@ -60,8 +60,8 @@ type ServerConfig struct {
 	UnaryInterceptors []grpc.UnaryServerInterceptor
 	// Logger specifies the logger the server will use
 	Logger *flogging.FabricLogger
-	// Metrics Provider
-	MetricsProvider metrics.Provider
+	// ServerStatsHandler should be set if metrics on connections are to be reported.
+	ServerStatsHandler *ServerStatsHandler
 }
 
 // ClientConfig defines the parameters for configuring a GRPCClient instance
@@ -114,6 +114,8 @@ type SecureOptions struct {
 	RequireClientCert bool
 	// CipherSuites is a list of supported cipher suites for TLS
 	CipherSuites []uint16
+	// TimeShift makes TLS handshakes time sampling shift to the past by a given duration
+	TimeShift time.Duration
 }
 
 // KeepaliveOptions is used to set the gRPC keepalive settings for both
