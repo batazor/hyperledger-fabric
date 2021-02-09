@@ -17,7 +17,7 @@ require (
 	github.com/hyperledger/fabric-sdk-go v1.0.0-alpha5
 	github.com/miekg/pkcs11 v1.0.3 // indirect
 	github.com/morikuni/aec v0.0.0-20170113033406-39771216ff4c // indirect
-	github.com/pkg/errors v0.8.1
+	github.com/pkg/errors v0.9.1
 	github.com/s7techlab/cckit v0.6.3
 	github.com/sykesm/zap-logfmt v0.0.2 // indirect
 )
