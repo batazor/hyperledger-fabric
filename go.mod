@@ -14,7 +14,7 @@ require (
 	github.com/golang/mock v1.3.0 // indirect
 	github.com/hyperledger/fabric v1.4.2
 	github.com/hyperledger/fabric-lib-go v1.0.0 // indirect
-	github.com/hyperledger/fabric-sdk-go v1.0.0-alpha5
+	github.com/hyperledger/fabric-sdk-go v1.0.0
 	github.com/miekg/pkcs11 v1.0.3 // indirect
 	github.com/morikuni/aec v0.0.0-20170113033406-39771216ff4c // indirect
 	github.com/pkg/errors v0.8.1
