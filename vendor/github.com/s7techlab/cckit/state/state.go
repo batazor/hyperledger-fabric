@@ -5,10 +5,11 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/hyperledger/fabric/core/chaincode/shim"
-	"github.com/hyperledger/fabric/protos/ledger/queryresult"
+	"github.com/hyperledger/fabric-chaincode-go/shim"
+	"github.com/hyperledger/fabric-protos-go/ledger/queryresult"
 	"github.com/pkg/errors"
 	"github.com/s7techlab/cckit/convert"
+	"go.uber.org/zap"
 )
 
 // HistoryEntry struct containing history information of a single entry
@@ -94,7 +95,7 @@ type State interface {
 	// entry can be Key (string or []string) or type implementing Keyer interface
 	Delete(entry interface{}) (err error)
 
-	Logger() *shim.ChaincodeLogger
+	Logger() *zap.Logger
 
 	UseKeyTransformer(KeyTransformer) State
 	UseStateGetTransformer(FromBytesTransformer) State
@@ -136,16 +137,20 @@ func (k Key) Append(key Key) Key {
 	return append(k, key...)
 }
 
+func (k Key) String() string {
+	return strings.Join(k, ` | `)
+}
+
 type Impl struct {
 	stub                shim.ChaincodeStubInterface
-	logger              *shim.ChaincodeLogger
+	logger              *zap.Logger
 	StateKeyTransformer KeyTransformer
 	StateGetTransformer FromBytesTransformer
 	StatePutTransformer ToBytesTransformer
 }
 
 // NewState creates wrapper on shim.ChaincodeStubInterface for working with state
-func NewState(stub shim.ChaincodeStubInterface, logger *shim.ChaincodeLogger) *Impl {
+func NewState(stub shim.ChaincodeStubInterface, logger *zap.Logger) *Impl {
 	return &Impl{
 		stub:                stub,
 		logger:              logger,
@@ -155,7 +160,7 @@ func NewState(stub shim.ChaincodeStubInterface, logger *shim.ChaincodeLogger) *I
 	}
 }
 
-func (s *Impl) Logger() *shim.ChaincodeLogger {
+func (s *Impl) Logger() *zap.Logger {
 	return s.logger
 }
 
@@ -180,7 +185,7 @@ func (s *Impl) Key(key interface{}) (*TransformedKey, error) {
 		return nil, errors.Wrap(err, `key normalizing`)
 	}
 
-	s.logger.Debugf(`state KEY: %s`, trKey.Origin)
+	s.logger.Debug(`state KEY`, zap.String(`key`, trKey.Origin.String()))
 
 	if trKey.Parts, err = s.StateKeyTransformer(trKey.Origin); err != nil {
 		return nil, err
@@ -201,7 +206,7 @@ func (s *Impl) Get(entry interface{}, config ...interface{}) (interface{}, error
 	}
 
 	//bytes from state
-	s.logger.Debugf(`state GET %s`, key.String)
+	s.logger.Debug(`state GET`, zap.String(`key`, key.String))
 	bb, err := s.stub.GetState(key.String)
 	if err != nil {
 		return nil, err
@@ -211,7 +216,7 @@ func (s *Impl) Get(entry interface{}, config ...interface{}) (interface{}, error
 		if len(config) >= 2 {
 			return config[1], nil
 		}
-		return nil, errors.Wrap(KeyError(key), ErrKeyNotFound.Error())
+		return nil, errors.Errorf(`%s: %s`, ErrKeyNotFound, key.Origin)
 	}
 
 	// config[0] - target type
@@ -270,7 +275,7 @@ func (s *Impl) Exists(entry interface{}) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	s.logger.Debugf(`state check EXISTENCE %s`, key.String)
+	s.logger.Debug(`state check EXISTENCE`, zap.String(`key`, key.String))
 	bb, err := s.stub.GetState(key.String)
 	if err != nil {
 		return false, err
@@ -289,13 +294,13 @@ func (s *Impl) List(namespace interface{}, target ...interface{}) (interface{}, 
 	if err != nil {
 		return nil, errors.Wrap(err, `prepare list key parts`)
 	}
-	s.logger.Debugf(`state LIST namespace: %s`, key)
+	s.logger.Debug(`state LIST`, zap.String(`namespace`, key.String()))
 
 	key, err = s.StateKeyTransformer(key)
 	if err != nil {
 		return nil, err
 	}
-	s.logger.Debugf(`state LIST with composite key: %s`, key)
+	s.logger.Debug(`state LIST with composite key`, zap.String(`key`, key.String()))
 
 	iter, err := s.stub.GetStateByPartialCompositeKey(key[0], key[1:])
 	if err != nil {
@@ -355,7 +360,7 @@ func (s *Impl) Put(entry interface{}, values ...interface{}) error {
 		return err
 	}
 
-	s.logger.Debugf(`state PUT with string key: %s`, key.String)
+	s.logger.Debug(`state PUT`, zap.String(`key`, key.String))
 	return s.stub.PutState(key.String, bb)
 }
 
@@ -365,7 +370,7 @@ func (s *Impl) Insert(entry interface{}, values ...interface{}) error {
 		return err
 	} else if exists {
 		key, _ := s.Key(entry)
-		return errors.Wrap(KeyError(key), ErrKeyAlreadyExists.Error())
+		return errors.Errorf(`%s: %s`, ErrKeyAlreadyExists, key.Origin)
 	}
 
 	key, value, err := s.argKeyValue(entry, values)
@@ -382,7 +387,7 @@ func (s *Impl) Delete(entry interface{}) error {
 		return errors.Wrap(err, `deleting from state`)
 	}
 
-	s.logger.Debugf(`state DELETE with string key: %s`, key.String)
+	s.logger.Debug(`state DELETE`, zap.String(`key`, key.String))
 	return s.stub.DelState(key.String)
 }
 
@@ -398,12 +403,6 @@ func (s *Impl) UseStateGetTransformer(fb FromBytesTransformer) State {
 func (s *Impl) UseStatePutTransformer(tb ToBytesTransformer) State {
 	s.StatePutTransformer = tb
 	return s
-}
-
-// KeyError error with key
-func KeyError(key *TransformedKey) error {
-	// show origin key
-	return errors.New(strings.Join(key.Origin, ` | `))
 }
 
 type stringKeyer struct {
@@ -428,7 +427,7 @@ func (s *Impl) GetPrivate(collection string, entry interface{}, config ...interf
 	}
 
 	//bytes from private state
-	s.logger.Debugf(`private state GET %s`, key.String)
+	s.logger.Debug(`private state GET`, zap.String(`key`, key.String))
 	bb, err := s.stub.GetPrivateData(collection, key.String)
 	if err != nil {
 		return nil, err
@@ -438,7 +437,7 @@ func (s *Impl) GetPrivate(collection string, entry interface{}, config ...interf
 		if len(config) >= 2 {
 			return config[1], nil
 		}
-		return nil, errors.Wrap(KeyError(key), ErrKeyNotFound.Error())
+		return nil, errors.Errorf(`%s: %s`, ErrKeyNotFound, key.Origin.String())
 	}
 
 	// config[0] - target type
@@ -451,7 +450,7 @@ func (s *Impl) ExistsPrivate(collection string, entry interface{}) (bool, error)
 	if err != nil {
 		return false, err
 	}
-	s.logger.Debugf(`private state check EXISTENCE %s`, key.String)
+	s.logger.Debug(`private state check EXISTENCE`, zap.String(`key`, key.String))
 	bb, err := s.stub.GetPrivateData(collection, key.String)
 	if err != nil {
 		return false, err
@@ -473,12 +472,12 @@ func (s *Impl) ListPrivate(collection string, usePrivateDataIterator bool, names
 	if err != nil {
 		return nil, errors.Wrap(err, `prepare list key parts`)
 	}
-	s.logger.Debugf(`state LIST namespace: %s`, key)
+	s.logger.Debug(`state LIST`, zap.String(`namespace`, key.String()))
 
 	if key, err = s.StateKeyTransformer(key); err != nil {
 		return nil, err
 	}
-	s.logger.Debugf(`state LIST with composite key: %s`, key)
+	s.logger.Debug(`state LIST with composite key`, zap.String(`namespace`, key.String()))
 
 	if usePrivateDataIterator {
 		iter, err := s.stub.GetPrivateDataByPartialCompositeKey(collection, key[0], key[1:])
@@ -534,7 +533,7 @@ func (s *Impl) PutPrivate(collection string, entry interface{}, values ...interf
 		return err
 	}
 
-	s.logger.Debugf(`state PUT with string key: %s`, key.String)
+	s.logger.Debug(`state PUT`, zap.String(`key`, key.String))
 	return s.stub.PutPrivateData(collection, key.String, bb)
 }
 
@@ -543,8 +542,8 @@ func (s *Impl) InsertPrivate(collection string, entry interface{}, values ...int
 	if exists, err := s.ExistsPrivate(collection, entry); err != nil {
 		return err
 	} else if exists {
-		strKey, _ := s.Key(entry)
-		return errors.Wrap(KeyError(strKey), ErrKeyAlreadyExists.Error())
+		key, _ := s.Key(entry)
+		return errors.Errorf(`%s: %s`, ErrKeyAlreadyExists, key.Origin)
 	}
 
 	key, value, err := s.argKeyValue(entry, values)
@@ -560,6 +559,6 @@ func (s *Impl) DeletePrivate(collection string, entry interface{}) error {
 	if err != nil {
 		return errors.Wrap(err, `deleting from private state`)
 	}
-	s.logger.Debugf(`private state DELETE with string key: %s`, key.String)
+	s.logger.Debug(`private state DELETE`, zap.String(`key`, key.String))
 	return s.stub.DelPrivateData(collection, key.String)
 }
